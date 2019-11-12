@@ -1,53 +1,51 @@
-const express = require("express");
-const router = express.Router();
-const ytdl = require("youtube-dl");
-const fs = require("fs");
-const AUDIO_FORMAT = "mp3";
-const VIDEO_FORMAT = "mp4";
-const pending = [];
+var express = require('express');
+var router = express.Router();
+var ytdl = require('youtube-dl');
+var request = require('request');
 
 /* GET home page. */
-router.get("/", (req, res) => res.sendFile(__dirname + "/index.html"));
-
-router.post("/video", (req, res) => {
-  const url = req.body.url;
-  ytdl.getInfo(url, null, (err, info) => {
-    if (err) {
-      console.error(err);
-      return;
-    }
-    download(url, info._filename, info.title);
-  });
-  res.redirect("/");
+router.get('/', function(req, res, next) {
+    res.render('index', { title: 'Youtube Downloader Web App' });
 });
 
-const download = (url, defaultFilename, actualFilename) => {
-  ytdl.exec(url, ["-x", "--audio-format", AUDIO_FORMAT], {}, (err, output) => {
-    if (err) {
-      console.error(err);
-      return;
-    }
-    console.log(output.join("\n"));
-    renameFile(defaultFilename, `${actualFilename}.${AUDIO_FORMAT}`);
-  });
+// convert to human readable format
+function bytesToSize(bytes) {
+   var sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+   if (bytes == 0) return '0 Byte';
+   var i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
+   return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
 };
 
-const renameFile = (baseFilename, actualFilename) => {
-  const filename = baseFilename.replace(VIDEO_FORMAT, AUDIO_FORMAT);
-  fs.exists(filename, exists => {
-    if (exists) {
-      fs.rename(filename, actualFilename, err => {
-        if (err) console.error(err);
-        console.log(
-          `Successfully renamed the file ${filename} to ${actualFilename}`
-        );
-      });
-      delete pending[filename];
-    } else {
-      console.warn(`${filename} does not exist`);
-      pending[filename] = actualFilename;
-    }
-  });
-};
+
+router.post('/video', function(req, res, next) {
+    var url = req.body.url,
+        formats = [],
+        pattern = /^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|v\/)?)([\w\-]+)(\S+)?$/;
+
+    request.get(url, function (err, resp, body) {
+        // check if it is valid url
+        if(pattern.test(resp.request.uri.href)) {
+            ytdl.getInfo(url, ['--youtube-skip-dash-manifest'], function(err, info) {
+                if(err) return res.render('listvideo', {error: 'The link you provided either not a valid url or it is not acceptable'});
+
+                // push all video formats for download (skipping audio)
+                info.formats.forEach(function(item) {
+                    if(item.format_note !== 'DASH audio' && item.filesize) {
+                        item.filesize = item.filesize ? bytesToSize(item.filesize): 'unknown';
+                        formats.push(item);
+                    }
+                });
+                res.render('listvideo', {meta: {id: info.id, formats: formats}});
+            })
+        }
+        else {
+            res.render('listvideo', {error: 'The link you provided either not a valid url or it is not acceptable'});
+        }
+    });
+
+
+
+})
+
 
 module.exports = router;
